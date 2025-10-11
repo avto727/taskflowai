@@ -3,11 +3,13 @@
 import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(
-    os.path.dirname(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 import requests
 from fastmcp import FastMCP
+from dotenv import load_dotenv
+
+load_dotenv()
 
 mcp = FastMCP("Trello MCP")
 
@@ -55,10 +57,10 @@ def get_board_lists(board_id: str = None) -> list[dict]:
     """Получить списки (колонки) доски"""
     api_key, token, default_board = get_env_config()
     board = board_id or default_board
-    
+
     if not board:
         raise ValueError("board_id не указан")
-    
+
     url = f"https://api.trello.com/1/boards/{board}/lists"
     params = {"key": api_key, "token": token}
     return request_get(url, params)
@@ -69,10 +71,10 @@ def get_board_cards(board_id: str = None) -> list[dict]:
     """Получить все карточки доски"""
     api_key, token, default_board = get_env_config()
     board = board_id or default_board
-    
+
     if not board:
         raise ValueError("board_id не указан")
-    
+
     url = f"https://api.trello.com/1/boards/{board}/cards"
     params = {"key": api_key, "token": token}
     return request_get(url, params)
@@ -85,76 +87,68 @@ def create_card(
     """Создать карточку в списке"""
     api_key, token, default_board = get_env_config()
     board = board_id or default_board
-    
+
     # Найти список по имени
     lists = get_board_lists(board)
     target_list = next(
-        (l for l in lists if list_name.lower() in l["name"].lower()),
-        None
+        (lst for lst in lists if list_name.lower() in lst["name"].lower()),
+        None,
     )
-    
+
     if not target_list:
-        available = [l["name"] for l in lists]
+        available = [lst["name"] for lst in lists]
         raise ValueError(
-            f"Список '{list_name}' не найден. "
-            f"Доступные: {available}"
+            f"Список '{list_name}' не найден. " f"Доступные: {available}"
         )
-    
+
     url = "https://api.trello.com/1/cards"
     params = {
         "key": api_key,
         "token": token,
         "idList": target_list["id"],
         "name": name,
-        "desc": desc
+        "desc": desc,
     }
     return request_post(url, params)
 
 
 @mcp.tool
-def update_card(card_id: str, name: str = None, 
-                desc: str = None) -> dict:
+def update_card(card_id: str, name: str = None, desc: str = None) -> dict:
     """Обновить карточку"""
     api_key, token, _ = get_env_config()
-    
+
     url = f"https://api.trello.com/1/cards/{card_id}"
     params = {"key": api_key, "token": token}
-    
+
     if name:
         params["name"] = name
     if desc:
         params["desc"] = desc
-    
+
     return request_put(url, params)
 
 
 @mcp.tool
-def move_card(card_id: str, list_name: str, 
-              board_id: str = None) -> dict:
+def move_card(card_id: str, list_name: str, board_id: str = None) -> dict:
     """Переместить карточку в другой список"""
     api_key, token, default_board = get_env_config()
     board = board_id or default_board
-    
+
     # Найти список
     lists = get_board_lists(board)
     target_list = next(
-        (l for l in lists if list_name.lower() in l["name"].lower()),
-        None
+        (lst for lst in lists if list_name.lower() in lst["name"].lower()),
+        None,
     )
-    
+
     if not target_list:
-        available = [l["name"] for l in lists]
+        available = [lst["name"] for lst in lists]
         raise ValueError(
-            f"Список '{list_name}' не найден. "
-            f"Доступные: {available}"
+            f"Список '{list_name}' не найден. " f"Доступные: {available}"
         )
-    
+
     url = f"https://api.trello.com/1/cards/{card_id}"
-    params = {
-        "key": api_key,
-        "token": token,
-        "idList": target_list["id"]
-    }
+    params = {"key": api_key, "token": token, "idList": target_list["id"]}
     return request_put(url, params)
 
 
@@ -163,16 +157,18 @@ def search_cards(query: str, board_id: str = None) -> list[dict]:
     """Поиск карточек по тексту"""
     api_key, token, default_board = get_env_config()
     board = board_id or default_board
-    
+
     cards = get_board_cards(board)
-    
+
     # Фильтр по query
     results = []
     for card in cards:
-        if (query.lower() in card["name"].lower() or 
-            query.lower() in card.get("desc", "").lower()):
+        if (
+            query.lower() in card["name"].lower()
+            or query.lower() in card.get("desc", "").lower()
+        ):
             results.append(card)
-    
+
     return results
 
 
@@ -180,35 +176,31 @@ def search_cards(query: str, board_id: str = None) -> list[dict]:
 def get_card_checklists(card_id: str) -> list[dict]:
     """Получить чеклисты карточки"""
     api_key, token, _ = get_env_config()
-    
+
     url = f"https://api.trello.com/1/cards/{card_id}/checklists"
     params = {"key": api_key, "token": token}
     return request_get(url, params)
 
 
 @mcp.tool
-def add_checklist_item(card_id: str, checklist_name: str,
-                       item_name: str) -> dict:
+def add_checklist_item(
+    card_id: str, checklist_name: str, item_name: str
+) -> dict:
     """Добавить пункт в чеклист"""
     api_key, token, _ = get_env_config()
-    
+
     # Найти чеклист
     checklists = get_card_checklists(card_id)
     target = next(
-        (c for c in checklists 
-         if checklist_name.lower() in c["name"].lower()),
-        None
+        (c for c in checklists if checklist_name.lower() in c["name"].lower()),
+        None,
     )
-    
+
     if not target:
         raise ValueError(f"Чеклист '{checklist_name}' не найден")
-    
+
     url = f"https://api.trello.com/1/checklists/{target['id']}/checkItems"
-    params = {
-        "key": api_key,
-        "token": token,
-        "name": item_name
-    }
+    params = {"key": api_key, "token": token, "name": item_name}
     return request_post(url, params)
 
 
@@ -216,13 +208,9 @@ def add_checklist_item(card_id: str, checklist_name: str,
 def check_checklist_item(card_id: str, item_id: str) -> dict:
     """Отметить пункт чеклиста как выполненный"""
     api_key, token, _ = get_env_config()
-    
+
     url = f"https://api.trello.com/1/cards/{card_id}/checkItem/{item_id}"
-    params = {
-        "key": api_key,
-        "token": token,
-        "state": "complete"
-    }
+    params = {"key": api_key, "token": token, "state": "complete"}
     return request_put(url, params)
 
 

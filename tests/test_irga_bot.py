@@ -33,40 +33,41 @@ def get_last_bot_message():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     r = requests.get(url, params={"limit": 100})
     updates = r.json().get("result", [])
-    
+
     # Ищем последнее сообщение от бота в нашем чате
     for update in reversed(updates):
         msg = update.get("message", {})
-        if (str(msg.get("chat", {}).get("id")) == str(CHAT_ID) 
-            and msg.get("from", {}).get("is_bot")):
+        if str(msg.get("chat", {}).get("id")) == str(CHAT_ID) and msg.get(
+            "from", {}
+        ).get("is_bot"):
             return msg.get("text", "")
-    
+
     return ""
 
 
 def test_command(command: str, wait_seconds: int = 5):
     """Протестировать команду"""
     print(f"\n🧪 Тест: {command}")
-    
+
     # Отправляем
     result = send_message(command)
     if not result.get("ok"):
         print(f"❌ Ошибка отправки: {result}")
         return False
-    
-    print(f"✅ Отправлено")
-    
+
+    print("✅ Отправлено")
+
     # Ждём ответ
     print(f"⏳ Ожидание {wait_seconds} сек...")
     time.sleep(wait_seconds)
-    
+
     # Проверяем ответ
     response = get_last_bot_message()
     if response:
         print(f"📨 Ответ: {response[:100]}...")
         return True
     else:
-        print(f"❌ Нет ответа")
+        print("❌ Нет ответа")
         return False
 
 
@@ -74,7 +75,7 @@ def main():
     print("🤖 Автотесты команд Ирги\n")
     print(f"Bot Token: {BOT_TOKEN[:10]}...")
     print(f"Chat ID: {CHAT_ID}\n")
-    
+
     commands = [
         "Ирга, привет!",
         "Ирга, помоги",
@@ -82,26 +83,26 @@ def main():
         "Ирга, план на сегодня",
         "Ирга, что по здоровью?",
     ]
-    
+
     results = []
     for cmd in commands:
         success = test_command(cmd, wait_seconds=5)
         results.append((cmd, success))
         time.sleep(2)  # Пауза между тестами
-    
+
     # Итоги
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("📊 Результаты тестирования:\n")
-    
+
     passed = sum(1 for _, success in results if success)
     total = len(results)
-    
+
     for cmd, success in results:
         status = "✅" if success else "❌"
         print(f"{status} {cmd}")
-    
+
     print(f"\n🎯 Пройдено: {passed}/{total}")
-    
+
     if passed == total:
         print("🎉 Все тесты пройдены!")
     else:
