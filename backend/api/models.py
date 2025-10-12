@@ -1,11 +1,14 @@
 """
 Pydantic модели для TaskFlowAI API
 """
+
 from pydantic import BaseModel
 from typing import Optional
 
+
 class MessageRequest(BaseModel):
     text: str
+
 
 class TaskRequest(BaseModel):
     content: str
@@ -14,6 +17,7 @@ class TaskRequest(BaseModel):
     priority: Optional[int] = 1
     parent_id: Optional[str] = None
     is_recurring: Optional[bool] = False
+
 
 class TaskUpdate(BaseModel):
     content: Optional[str] = None

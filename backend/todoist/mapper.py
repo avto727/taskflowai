@@ -1,21 +1,23 @@
 """
-Маппинг категорий Irga → Todoist проекты
+Маппинг Todoist проектов и секций
+Терминология: Project (проект) > Section (секция) > Task > Subtask
 """
-from typing import Dict, Optional
+
+from typing import Optional
 
 
-class CategoryMapper:
-    """Маппер категорий Irga в проекты Todoist"""
-    
-    # Маппинг категорий Irga → названия проектов Todoist
-    CATEGORY_TO_PROJECT = {
+class ProjectMapper:
+    """Маппер проектов и секций Todoist"""
+
+    # Маппинг: ключевые слова → названия проектов Todoist
+    # Поддерживает старую терминологию (категории) для совместимости
+    PROJECT_MAPPING = {
         # Основные категории
         "Деньги": "💰 Деньги",
-        "Семья": "👨👩👧👦 Семья", 
+        "Семья": "👨👩👧👦 Семья",
         "Здоровье": "💪 Здоровье",
         "Взаимоотношения": "💕 Отношения",
         "Духовность и развитие личности": "📚 Развитие",
-        
         # Подкатегории Деньги
         "Зарплата": "💰 Деньги",
         "Инвестиции": "💰 Деньги",
@@ -27,7 +29,6 @@ class CategoryMapper:
         "Бюджет": "💰 Деньги",
         "Расходы": "💰 Деньги",
         "Доходы": "💰 Деньги",
-        
         # Подкатегории Семья
         "Дети": "👨👩👧👦 Семья",
         "Родители": "👨👩👧👦 Семья",
@@ -39,7 +40,6 @@ class CategoryMapper:
         "Быт": "👨👩👧👦 Семья",
         "Образование": "👨👩👧👦 Семья",
         "Досуг": "👨👩👧👦 Семья",
-        
         # Подкатегории Здоровье
         "Врачи": "💪 Здоровье",
         "Анализы": "💪 Здоровье",
@@ -51,7 +51,6 @@ class CategoryMapper:
         "Стоматология": "💪 Здоровье",
         "Медосмотр": "💪 Здоровье",
         "Процедуры": "💪 Здоровье",
-        
         # Подкатегории Взаимоотношения
         "Друзья": "💕 Отношения",
         "Коллеги": "💕 Отношения",
@@ -63,7 +62,6 @@ class CategoryMapper:
         "Сотрудничество": "💕 Отношения",
         "Нетворкинг": "💕 Отношения",
         "Мероприятия": "💕 Отношения",
-        
         # Подкатегории Развитие
         "Обучение": "📚 Развитие",
         "Книги": "📚 Развитие",
@@ -74,69 +72,69 @@ class CategoryMapper:
         "Саморазвитие": "📚 Развитие",
         "Цели": "📚 Развитие",
         "Рефлексия": "📚 Развитие",
-        "Практики": "📚 Развитие"
+        "Практики": "📚 Развитие",
     }
-    
+
     def __init__(self, projects: list):
         """
         Инициализация с проектами из Todoist
-        
+
         Args:
             projects: Список проектов из Todoist API
         """
         # Создаём маппинг название → ID проекта
         self.project_name_to_id = {
-            project["name"]: project["id"] 
-            for project in projects
+            project["name"]: project["id"] for project in projects
         }
-        
-        # ID проекта Inbox (для неопределённых категорий)
+
+        # ID проекта Inbox (для неопределённых проектов)
         self.inbox_id = self.project_name_to_id.get("Inbox")
-    
-    def get_project_id(self, irga_category: str) -> Optional[str]:
+
+    def get_project_id(self, project_key: str) -> Optional[str]:
         """
-        Получить ID проекта Todoist по категории Irga
-        
+        Получить ID проекта Todoist по ключевому слову
+
         Args:
-            irga_category: Категория из Irga (например, "Покупки")
-            
+            project_key: Ключевое слово проекта/секции
+                        (например, "Покупки", "Здоровье")
+
         Returns:
             ID проекта Todoist или None если не найден
         """
-        # Ищем проект по категории
-        project_name = self.CATEGORY_TO_PROJECT.get(irga_category)
+        # Ищем проект по ключу
+        project_name = self.PROJECT_MAPPING.get(project_key)
         if project_name:
             return self.project_name_to_id.get(project_name)
-        
-        # Если категория не найдена, возвращаем Inbox
+
+        # Если не найдено, возвращаем Inbox
         return self.inbox_id
-    
-    def get_project_name(self, irga_category: str) -> str:
+
+    def get_project_name(self, project_key: str) -> str:
         """
-        Получить название проекта Todoist по категории Irga
-        
+        Получить название проекта Todoist по ключевому слову
+
         Args:
-            irga_category: Категория из Irga
-            
+            project_key: Ключевое слово проекта/секции
+
         Returns:
             Название проекта Todoist
         """
-        return self.CATEGORY_TO_PROJECT.get(irga_category, "Inbox")
+        return self.PROJECT_MAPPING.get(project_key, "Inbox")
 
 
 # Тестирование маппера
 if __name__ == "__main__":
     from client import TodoistClient
-    
+
     client = TodoistClient()
     projects = client.get_projects()
-    mapper = CategoryMapper(projects)
-    
+    mapper = ProjectMapper(projects)
+
     # Тестируем маппинг
-    test_categories = ["Покупки", "Врачи", "Друзья", "Книги", "Неизвестная категория"]
-    
-    print("🗺️ Тестирование маппинга категорий:")
-    for category in test_categories:
-        project_id = mapper.get_project_id(category)
-        project_name = mapper.get_project_name(category)
-        print(f"  {category} → {project_name} (ID: {project_id})")
+    test_keys = ["Покупки", "Врачи", "Друзья", "Книги", "Неизвестный проект"]
+
+    print("🗺️ Тестирование маппинга проектов:")
+    for key in test_keys:
+        project_id = mapper.get_project_id(key)
+        project_name = mapper.get_project_name(key)
+        print(f"  {key} → {project_name} (ID: {project_id})")
