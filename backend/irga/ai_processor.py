@@ -18,9 +18,15 @@ class AIProcessor:
             "OLLAMA_BASE_URL", "http://localhost:11434"
         )
         self.api_url = f"{self.base_url}/api/generate"
+        
+        # Hugging Face настройки
+        self.use_hf = os.getenv("USE_HUGGINGFACE", "false").lower() == "true"
+        self.hf_token = os.getenv("HUGGINGFACE_TOKEN")
+        self.hf_model = "Qwen/Qwen2.5-7B-Instruct"
+        
         logger.info(
             f"Инициализация AIProcessor: model={self.model}, "
-            f"url={self.base_url}"
+            f"url={self.base_url}, use_hf={self.use_hf}"
         )
 
     def _call_ollama(self, prompt: str) -> str:
@@ -33,6 +39,29 @@ class AIProcessor:
             return response.json()["response"]
         except Exception as e:
             logger.error(f"Ошибка вызова Ollama: {e}")
+            return ""
+
+    def _call_huggingface(self, prompt: str) -> str:
+        """Вызов Hugging Face API"""
+        if not self.hf_token:
+            logger.error("HUGGINGFACE_TOKEN не установлен")
+            return ""
+
+        url = f"https://api-inference.huggingface.co/models/{self.hf_model}"
+        headers = {"Authorization": f"Bearer {self.hf_token}"}
+        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 500}}
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, 
+                                   timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            
+            if isinstance(result, list) and len(result) > 0:
+                return result[0].get("generated_text", "").replace(prompt, "")
+            return ""
+        except Exception as e:
+            logger.error(f"Ошибка вызова Hugging Face: {e}")
             return ""
 
     def analyze_message(self, text: str, categories: list) -> Dict:
@@ -132,7 +161,10 @@ class AIProcessor:
 
 Верни ТОЛЬКО JSON, без дополнительного текста."""
 
-        response = self._call_ollama(prompt)
+        if self.use_hf:
+            response = self._call_huggingface(prompt)
+        else:
+            response = self._call_ollama(prompt)
 
         try:
             # Извлекаем JSON из ответа
