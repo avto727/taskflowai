@@ -1,8 +1,16 @@
 # 🚀 Деплой v1.0 на Railway (Гибридный вариант)
 
+> **Статус:** 🔷 Н3. В работе (Октябрь 2025)  
+> **Версия:** v1.0 (19 эпиков завершено)
+
 ## 📋 Архитектура
-- **Ollama**: Локально на рабочем компе (через ngrok)
+- **Ollama**: Локально на рабочем компе (через ngrok/Cloudflare)
 - **API + Bot**: Railway.app
+
+**Почему гибридный?**
+- Ollama требует мощное железо (GPU для быстрых ответов)
+- Railway не предоставляет GPU в бесплатном тарифе
+- Локальный Ollama + ngrok = бесплатное решение для тестирования
 
 ---
 
@@ -187,13 +195,105 @@ curl https://abc123.ngrok.io/api/tags
 
 ---
 
-## 🎯 Следующие шаги (Release 2)
+## 📦 Что готово для деплоя (2025-10-13)
 
-- [ ] Перенести Ollama на VPS
+### ✅ Код полностью готов
+- ✅ Все 73 ошибки линтеров исправлены (8 линтеров: RUFF, BLACK, 
+  VULTURE, PYLINT, FLAKE8-BUGBEAR)
+- ✅ Рефакторинг завершён (нет дублирования, нет мёртвого кода)
+- ✅ API работает локально (FastAPI на порту 8000)
+- ✅ Bot работает локально (aiogram 3.x)
+- ✅ Ollama интегрирован (модель qwen2.5:7b)
+- ✅ Все зависимости в `requirements.txt`
+
+### ✅ Конфигурация Railway готова
+- ✅ `Procfile` - команды запуска
+- ✅ `railway.json` - конфиг API сервиса
+- ✅ `railway.bot.json` - конфиг Bot сервиса
+- ✅ `runtime.txt` - Python 3.13
+- ✅ `.gitignore` - исключения для деплоя
+
+### ✅ Документация готова
+- ✅ `DEPLOY_V1.md` - пошаговая инструкция деплоя
+- ✅ `README.md` - общая документация проекта
+- ✅ `description.md` - техническая архитектура
+- ✅ Все переменные окружения описаны
+
+### 🔧 Что нужно сделать при деплое
+
+**1. Подготовка (5 минут):**
+   - Запустить локально `ollama serve`
+   - Запустить `ngrok http 11434` (или Cloudflare Tunnel)
+   - Скопировать ngrok URL (например: `https://abc123.ngrok.io`)
+
+**2. Railway настройка (10 минут):**
+   - Создать проект на railway.app
+   - Создать 2 сервиса: API и Bot
+   - Добавить переменные окружения (см. секцию 2.2 и 3.2)
+   - Railway автоматически задеплоит из ветки `release-1`
+
+**3. Проверка (5 минут):**
+   - Проверить `/health` эндпоинт API
+   - Отправить `/start` в Telegram боте
+   - Создать тестовую задачу
+
+### 📝 Переменные окружения (критично!)
+
+**API сервис на Railway:**
+```env
+TODOIST_API_TOKEN=ваш_токен_todoist
+OLLAMA_BASE_URL=https://ваш-ngrok-url.ngrok.io
+API_BASE_URL=https://ваш-api.railway.app
+AUTH_ENABLED=false
+```
+
+**Bot сервис на Railway:**
+```env
+TELEGRAM_BOT_TOKEN=ваш_токен_telegram
+TODOIST_API_TOKEN=ваш_токен_todoist
+OLLAMA_BASE_URL=https://ваш-ngrok-url.ngrok.io
+API_BASE_URL=https://ваш-api.railway.app
+AUTH_ENABLED=false
+```
+
+### ⚠️ Важно знать через год
+
+**ngrok URL меняется при перезапуске:**
+- Бесплатный ngrok даёт новый URL каждый раз
+- Решение 1: Платный ngrok ($8/мес) - статичный домен
+- Решение 2: Cloudflare Tunnel (бесплатно, стабильно)
+- Решение 3: VPS с белым IP (для продакшена)
+
+**Обновление OLLAMA_BASE_URL:**
+1. Railway Dashboard → Your Project → Variables
+2. Обновить `OLLAMA_BASE_URL` в обоих сервисах
+3. Сервисы перезапустятся автоматически
+
+**Структура проекта не менялась:**
+- `backend/api/main_api.py` - FastAPI сервер
+- `clients/telegram/simple_bot.py` - Telegram бот
+- `backend/irga/ai_processor.py` - AI анализ
+- `backend/todoist/crud.py` - Todoist интеграция
+
+**Если что-то сломалось:**
+1. Проверить логи: `railway logs --service api` или `--service bot`
+2. Проверить ngrok активен: `curl https://your-url.ngrok.io/api/tags`
+3. Проверить переменные окружения в Railway Dashboard
+4. Проверить ветку деплоя: должна быть `release-1`
+
+---
+
+## 🎯 Следующие шаги (v2.0 - 43 задачи в бэклоге)
+
+- [ ] Перенести Ollama на VPS (GPU сервер)
 - [ ] Настроить Cloudflare Tunnel (вместо ngrok)
+- [ ] Продуктовая интеграция Trello ↔ Todoist
+- [ ] Чат-бот поддержки
+- [ ] MCP интеграции (Trello/Todoist)
 - [ ] Добавить мониторинг (Sentry, Grafana)
 - [ ] Настроить автоматические бэкапы БД
 - [ ] CI/CD пайплайны (тесты перед деплоем)
+
 
 
 
