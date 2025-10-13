@@ -14,7 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "irga"))
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "todoist"))
 
 from taskflow_integration import TaskFlowAI
-from models import MessageRequest, TaskRequest
+from .models import MessageRequest, TaskRequest
 from crud import filter_tasks_by_time
 
 # Создаём FastAPI приложение
