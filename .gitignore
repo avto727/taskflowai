@@ -36,3 +36,12 @@ __MACOSX/
 q-dev-chat*.md
 SESSION_SUMMARY*.md
 chat_archive.zip
+cursor_venv_*.md
+
+# Cursor IDE
+.cursor/
+default.json
+
+# MCP файлы с секретами
+mcp.json
+*.mcp.json
