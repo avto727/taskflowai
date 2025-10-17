@@ -45,3 +45,6 @@ default.json
 # MCP файлы с секретами
 mcp.json
 *.mcp.json
+
+# Telegram user tokens
+clients/telegram/telegram_users.json

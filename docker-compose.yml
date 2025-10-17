@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  taskflowai:
+    build: .
+    container_name: taskflowai_bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TODOIST_API_TOKEN=${TODOIST_API_TOKEN}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+      - ./clients/telegram/telegram_users.json:/app/clients/telegram/telegram_users.json
+    env_file:
+      - .env
+    network_mode: host

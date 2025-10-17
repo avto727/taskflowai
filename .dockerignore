@@ -1,32 +1,44 @@
+# Git
+.git
+.gitignore
+
 # Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+__pycache__
+*.pyc
+*.pyo
+*.pyd
 .Python
-env/
-venv/
-.venv/
-ENV/
+.venv
+venv
+ENV
+env
 
 # IDE
-.vscode/
-.idea/
+.vscode
+.idea
 *.swp
 *.swo
+
+# Logs
+*.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Project
-users.db
-*.log
-Архив_irga_1.zip
-
-# Git
-.git/
-.gitignore
-
-# Docs
+# Project specific
+*.db
 q-dev-chat*.md
+SESSION_SUMMARY*.md
+chat_archive.zip
+cursor_venv_*.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+DOCKER.md
