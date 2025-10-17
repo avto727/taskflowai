@@ -1,36 +1,39 @@
-# Инструменты разработки
+# TaskFlowAI Tools
 
-> **"Строительные леса"** - временные инструменты для разработки
+Служебные инструменты для разработки TaskFlowAI.
 
-## 🏗️ Философия
+## 📋 Trello Integration
 
-Эти инструменты не являются частью основного продукта.
-Они помогают в разработке, но могут быть удалены в любой момент.
-
-## Доступные инструменты
-
-### 📋 Kaiten (`kaiten/`)
-
-Интеграция с Kaiten.ru для управления проектом TaskFlowAI.
-
-**Что делает:**
-- Синхронизирует roadmap.csv → Kaiten доску
-- Обновляет roadmap.csv из Kaiten
-- Визуализирует прогресс разработки
-
-**Использование:**
+### Установка:
 ```bash
-# Синхронизация roadmap → Kaiten
-python tools/kaiten/sync_roadmap.py
-
-# Обновление roadmap из Kaiten
-python tools/kaiten/update_from_kaiten.py
+pip install -r tools/trello/requirements-dev.txt
 ```
 
-**Настройка:**
-См. `kaiten/README.md`
+### Настройка:
+Добавьте в `.env`:
+```env
+TRELLO_API_KEY=your_api_key
+TRELLO_TOKEN=your_token
+```
 
-## Удаление
+### Получение ключей:
+1. API Key: https://trello.com/app-key
+2. Token: https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&name=TaskFlowAI&key=YOUR_API_KEY
 
-Когда инструмент больше не нужен - просто удалите его папку.
-Основной код проекта не пострадает.
+### Использование:
+```bash
+# Синхронизация roadmap с Trello
+python tools/trello/sync_roadmap.py
+
+# Тест подключения
+python -c "from tools.trello.trello_client import TaskFlowTrello; t=TaskFlowTrello(); print('OK')"
+```
+
+## 📁 Структура:
+```
+tools/
+└── trello/
+    ├── trello_client.py      # Базовый клиент
+    ├── sync_roadmap.py       # Синхронизация roadmap
+    └── requirements-dev.txt  # Dev зависимости
+```

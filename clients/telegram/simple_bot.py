@@ -25,8 +25,8 @@ import sys
 # Добавляем пути для импорта модулей backend
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from api_client import TaskFlowAPIClient
-from backend.auth.db import init_db, save_token, get_token, delete_token
+from mcp.simple_client import SimpleOllamaClient
+from auth import init_db, save_token, get_token, delete_token
 
 load_dotenv()
 
@@ -47,15 +47,140 @@ class DeleteStates(StatesGroup):
     waiting_for_number = State()
 
 
+@dp.message(DeleteStates.waiting_for_number)
+async def delete_number_handler(message: Message, state: FSMContext):
+    text = message.text.strip()
+    
+    # Check for cancel command
+    if text.startswith('/cancel'):
+        return  # Let cancel handler process it
+    
+    # Extract numbers from text
+    import re
+    numbers = re.findall(r'\d+', text)
+    
+    if not numbers:
+        await message.answer("❌ Не найден номер. Попробуйте ещё раз:")
+        return
+    
+    # Sort numbers in descending order to avoid index shifting
+    sorted_numbers = sorted([int(n) for n in numbers], reverse=True)
+    
+    # Process each number
+    for task_number in sorted_numbers:
+
+        client = get_mcp_client(message.from_user.id)
+        
+        # Получаем все задачи
+        result = client.todoist.get_tasks()
+        if not result["success"]:
+            await message.answer("❌ Ошибка получения задач")
+            await state.clear()
+            return
+        
+        # Используем только родительские задачи (как в /tasks)
+        all_tasks = result["tasks"]
+        parent_tasks = [t for t in all_tasks if not t.get("parent_id")]
+        
+        if task_number < 1 or task_number > len(parent_tasks):
+            await message.answer(f"❌ Номер {task_number} должен быть от 1 до {len(parent_tasks)}")
+            continue
+        
+        task_to_delete = parent_tasks[task_number - 1]
+        
+        # Удаляем задачу
+        delete_result = client.todoist.delete_task(task_to_delete["id"])
+        
+        if delete_result["success"]:
+            await message.answer(
+                f"✅ <b>Задача {task_number} удалена!</b>\n\n"
+                f"🗑️ {task_to_delete['content']}",
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer(f"❌ Ошибка удаления {task_number}: {delete_result['error']}")
+    
+    await state.clear()
+
+
 class SubtaskStates(StatesGroup):
     waiting_for_parent_id = State()
     waiting_for_content = State()
 
 
-def get_api_client(telegram_id: int):
+@dp.message(SubtaskStates.waiting_for_parent_id)
+async def subtask_parent_handler(message: Message, state: FSMContext):
+    text = message.text.strip()
+    
+    # Check for cancel command
+    if text.startswith('/cancel'):
+        return  # Let cancel handler process it
+    
+    try:
+        parent_number = int(text)
+    except ValueError:
+        await message.answer("❌ Номер должен быть числом. Попробуйте ещё раз:")
+        return
+
+    client = get_mcp_client(message.from_user.id)
+    
+    # Получаем все задачи
+    result = client.todoist.get_tasks()
+    if not result["success"]:
+        await message.answer("❌ Ошибка получения задач")
+        await state.clear()
+        return
+    
+    # Оставляем только родительские задачи
+    parent_tasks = [t for t in result["tasks"] if not t.get("parent_id")]
+    
+    if parent_number < 1 or parent_number > len(parent_tasks):
+        await message.answer(f"❌ Номер должен быть от 1 до {len(parent_tasks)}")
+        return
+    
+    parent_task = parent_tasks[parent_number - 1]
+    
+    await state.update_data(parent_task=parent_task)
+    await state.set_state(SubtaskStates.waiting_for_content)
+    
+    await message.answer(
+        f"✅ Выбрана задача: <b>{parent_task['content']}</b>\n\n"
+        "Введите текст подзадачи:",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(SubtaskStates.waiting_for_content)
+async def subtask_content_handler(message: Message, state: FSMContext):
+    content = message.text.strip()
+    data = await state.get_data()
+    parent_task = data.get("parent_task")
+    
+    client = get_mcp_client(message.from_user.id)
+    
+    # Создаём подзадачу
+    result = client.todoist.create_task(
+        content=content,
+        parent_id=parent_task["id"]
+    )
+    
+    if result["success"]:
+        await message.answer(
+            f"✅ <b>Подзадача создана!</b>\n\n"
+            f"📝 {content}\n"
+            f"↳ Родитель: {parent_task['content']}",
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(f"❌ Ошибка: {result['error']}")
+    
+    await state.clear()
+
+
+def get_mcp_client(telegram_id: int):
     token = get_token(telegram_id)
     if token:
-        return TaskFlowAPIClient(todoist_token=token)
+        return SimpleOllamaClient(token)
     return None
 
 
@@ -101,13 +226,8 @@ async def token_handler(message: Message, state: FSMContext):
 
     token = text
 
-    api = TaskFlowAPIClient(todoist_token=token)
-    if not api.health_check():
-        await message.answer(
-            "❌ Неверный токен или API недоступен\n"
-            "Попробуйте ещё раз или /cancel"
-        )
-        return
+    # Simple token validation - just check length
+    # MCP client will validate when used
 
     save_token(message.from_user.id, token)
     await state.clear()
@@ -147,390 +267,248 @@ def get_main_keyboard():
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    api = get_api_client(message.from_user.id)
+    client = get_mcp_client(message.from_user.id)
 
-    if not api:
+    if not client:
         await message.answer(
-            "👋 <b>Добро пожаловать в TaskFlowAI!</b>\n\n"
+            "👋 <b>Добро пожаловать в TaskFlowAI MCP!</b>\n\n"
             "Для начала работы авторизуйтесь:\n"
             "/auth - подключить Todoist",
             parse_mode="HTML",
         )
         return
 
-    if not api.health_check():
-        await message.answer(
-            "❌ Backend API недоступен\n"
-            "Запустите: python backend/api/main.py"
-        )
-        return
-
     await message.answer(
-        "🚀 <b>TaskFlowAI Bot</b>\n\n"
-        "Умный таск-менеджер с ИИ!\n\n"
-        "📝 Просто напишите задачу:\n"
-        "• Купить молоко\n"
-        "• Позвонить врачу завтра\n"
-        "• Оплатить интернет\n\n"
-        "🤖 ИИ автоматически определит категорию и время\n\n"
-        "Команды:\n"
-        "/tasks - показать задачи\n"
-        "/projects - проекты\n"
-        "/help - помощь",
-        parse_mode="HTML",
-        reply_markup=get_main_keyboard(),
+        "🚀 <b>TaskFlowAI MCP Bot</b>\n\n"
+        "Умный таск-менеджер с MCP + Ollama!\n\n"
+        "📝 Просто общайтесь с ботом:\n"
+        "• Покажи мои задачи\n"
+        "• Создай задачу: купить молоко\n"
+        "• Покажи задачи проекта здоровье\n\n"
+        "🤖 MCP + Ollama понимают естественный язык!",
+        parse_mode="HTML"
     )
 
 
 @dp.message(Command("tasks"))
 async def tasks_handler(message: Message, state: FSMContext):
-    api = get_api_client(message.from_user.id)
-    if not api:
+    client = get_mcp_client(message.from_user.id)
+    if not client:
         await message.answer("❌ Сначала авторизуйтесь: /auth")
         return
 
-    result = api.get_tasks()
-
-    if result.get("status") != "success":
-        await message.answer(
-            f"❌ Ошибка: {result.get('message', 'Неизвестная ошибка')}"
-        )
+    # Получаем задачи через MCP
+    result = client.todoist.get_tasks()
+    if not result["success"]:
+        await message.answer(f"❌ Ошибка: {result['error']}")
         return
-
+    
     tasks = result["tasks"]
-
     if not tasks:
-        await message.answer("📝 Задач пока нет. Добавьте первую!")
+        await message.answer("📋 У вас нет задач")
         return
-
-    # v1.0: используем format_tasks_response для всех задач
-    text = format_tasks_response(tasks, "Ваши задачи")
-
-    # Добавляем статистику
-    total = len(tasks)
-    with_date = len([t for t in tasks if t.get("due")])
-    without_date = total - with_date
-    text += f"\n📊 <b>Статистика:</b> дел всего: {total}\n"
-    text += f"📅 С датами: {with_date} | ❓ Без даты: {without_date}\n"
-
-    await message.answer(text, parse_mode="HTML")
-
-
-def parse_due_datetime(due: dict) -> tuple[str, str]:
-    """
-    Парсит дату и время из due объекта Todoist
-
-    Returns:
-        (date_str, time_str): например ('2025-10-12', '14:30')
-        или ('2025-10-12', '')
-    """
-    if not due or not due.get("date"):
-        return "", ""
-
-    from datetime import datetime
-
-    due_str = due.get("datetime") or due.get("date")
-    dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
-    date_str = dt.strftime("%Y-%m-%d")
-    time_str = dt.strftime("%H:%M") if due.get("datetime") else ""
-    return date_str, time_str
-
-
-def extract_time_from_text(text: str) -> str:
-    """Извлечь время из текста используя dateutil.parser"""
-    from dateutil import parser
-
-    try:
-        # fuzzy=True игнорирует всё лишнее и ищет только дату/время
-        dt = parser.parse(text, fuzzy=True)
-        # Возвращаем только время в формате HH:MM
-        return dt.strftime("%H:%M")
-    except (ValueError, parser.ParserError):
-        return ""
-
-
-def format_tasks_response(tasks: list, title: str = "Задачи") -> str:
-    """Форматирование списка задач"""
-    if not tasks:
-        return f"<b>{title}</b>\n\nЗадач нет"
-
-    # v1.0: показываем все задачи без пагинации
-    tasks_to_show = tasks
-    text = f"📋 <b>{title} ({len(tasks)}):</b>\n\n"
-
-    # Создаём индекс родителей для поиска
-    parent_index = {
-        t["id"]: t for t in tasks_to_show if not t.get("parent_id")
-    }
-
-    # Группировка по дням
-    grouped = {}
-    for task in tasks_to_show:
-        # Для подзадач без даты берём дату родителя
-        if task.get("parent_id") and not task.get("due"):
-            parent = parent_index.get(task["parent_id"])
-            if parent and parent.get("due"):
-                due = parent["due"]
-            else:
-                due = None
-        else:
-            due = task.get("due")
-
-        date_str, time_str = parse_due_datetime(due)
-        if date_str:
-            sort_key = f"{date_str}T{time_str if time_str else '99:99'}"
-
-            # Для подзадач без своего времени пытаемся извлечь из текста
-            if task.get("parent_id") and not task.get("due"):
-                extracted_time = extract_time_from_text(task["content"])
-                if extracted_time:
-                    time_str = extracted_time
-                    sort_key = date_str + "T" + time_str
-        else:
-            date_str = "Без даты"
-            time_str = ""
-            sort_key = "9999-99-99T99:99"
-
-        if date_str not in grouped:
-            grouped[date_str] = []
-        grouped[date_str].append((task, time_str, sort_key))
-
-    for date_str in sorted(grouped.keys()):
-        if date_str != "Без даты":
-            text += f"<b>📅 {date_str}</b>\n"
-
-        # Сортируем задачи по времени
-        sorted_tasks = sorted(grouped[date_str], key=lambda x: x[2])
-
-        # Разделяем на родителей и подзадачи
-        parents = [
-            (t, ts, sk) for t, ts, sk in sorted_tasks if not t.get("parent_id")
-        ]
-        children = [
-            (t, ts, sk) for t, ts, sk in sorted_tasks if t.get("parent_id")
-        ]
-
-        # Выводим родителей с их подзадачами
-        shown_children = set()
-        for parent, time_str, _ in parents:
-            # Показываем родителя
-            time_part = f" 🕒 {time_str}" if time_str else ""
-            task_id = f" [#{parent['id'][-4:]}]"
-            text += f"  • {parent['content']}{time_part}{task_id}\n"
-
-            # Показываем его подзадачи
-            for child, child_time, _ in children:
-                if child.get("parent_id") == parent["id"]:
-                    child_time_part = f" 🕒 {child_time}" if child_time else ""
-                    text += f"    ↳ {child['content']}" f"{child_time_part}\n"
-                    shown_children.add(child["id"])
-
-        # Показываем "осиротевшие" подзадачи
-        for child, child_time, _ in children:
-            if child["id"] not in shown_children:
-                child_time_part = f" 🕒 {child_time}" if child_time else ""
-                text += f"    ↳ {child['content']}" f"{child_time_part}\n"
-
-        text += "\n"
-
-    return text
+    
+    # Создаем inline клавиатуру
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    # Разделяем на родительские задачи и подзадачи
+    parent_tasks = [t for t in tasks if not t.get("parent_id")]
+    subtasks = [t for t in tasks if t.get("parent_id")]
+    
+    # Группируем по датам
+    grouped_by_date = client._group_tasks_by_date(parent_tasks, subtasks)
+    
+    response = f"📋 Ваши задачи ({len(tasks)}):\n\n"
+    keyboard_rows = []
+    
+    counter = 1
+    for date_key in sorted(grouped_by_date.keys()):
+        date_label, tasks_for_date = grouped_by_date[date_key]
+        
+        # Заголовок даты
+        response += f"<b>📅 {date_label}</b>\n"
+        
+        # Задачи этой даты
+        for parent, parent_subtasks in tasks_for_date:
+            time_str = client._format_task_time(parent)
+            
+            # Строка с задачей и кнопкой
+            response += f"☐ {counter}. {parent['content']}{time_str}"
+            
+            # Inline кнопка рядом с задачей
+            keyboard_rows.append([
+                InlineKeyboardButton(
+                    text="✓",
+                    callback_data=f"complete_{parent['id']}"
+                )
+            ])
+            
+            response += "\n"
+            counter += 1
+            
+            # Подзадачи
+            for subtask in parent_subtasks:
+                subtask_time_str = client._format_task_time(subtask)
+                
+                response += f"  ☐ ↳ {subtask['content']}{subtask_time_str}"
+                
+                # Inline кнопка для подзадачи
+                keyboard_rows.append([
+                    InlineKeyboardButton(
+                        text="✓",
+                        callback_data=f"complete_{subtask['id']}"
+                    )
+                ])
+                
+                response += "\n"
+        
+        response += "\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    
+    await message.answer(
+        response, 
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
 
 
-@dp.message(Command("projects"))
+
+
+
+@dp.message(Command("areas"))
+@dp.message(Command("projects"))  # старая команда для совместимости
 @dp.message(Command("categories"))  # старая команда для совместимости
-async def categories_handler(message: Message):
-    api = get_api_client(message.from_user.id)
-    if not api:
+async def life_areas_handler(message: Message):
+    client = get_mcp_client(message.from_user.id)
+    if not client:
         await message.answer("❌ Сначала авторизуйтесь: /auth")
         return
 
-    result = api.get_categories()
-
-    if result.get("status") != "success":
+    # Получаем области жизни через MCP
+    result = client.todoist.get_projects()
+    if result["success"]:
+        life_areas = result["projects"]
+        
+        # Создаём клавиатуру с кнопками областей жизни
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        
+        for area in life_areas:
+            if area["name"] != "Inbox":  # Пропускаем Inbox
+                button = InlineKeyboardButton(
+                    text=area["name"],
+                    callback_data=f"life_area_{area['id']}"
+                )
+                keyboard.inline_keyboard.append([button])
+        
         await message.answer(
-            f"❌ Ошибка: {result.get('message', 'Неизвестная ошибка')}"
+            f"🌟 <b>Области жизни ({len(life_areas)-1}):</b>\n\n"
+            "Выберите область для просмотра задач:",
+            parse_mode="HTML",
+            reply_markup=keyboard
         )
-        return
-
-    categories = result["categories"]
-    text = "📂 <b>Категории TaskFlowAI:</b>\n\n"
-
-    for cat in categories:
-        text += f"{cat['emoji']} {cat['name']}\n"
-
-    await message.answer(text, parse_mode="HTML")
+    else:
+        await message.answer(f"❌ Ошибка: {result['error']}")
 
 
 @dp.message(Command("subtask"))
 async def subtask_handler(message: Message, state: FSMContext):
-    api = get_api_client(message.from_user.id)
-    if not api:
+    client = get_mcp_client(message.from_user.id)
+    if not client:
         await message.answer("❌ Сначала авторизуйтесь: /auth")
         return
 
     await state.set_state(SubtaskStates.waiting_for_parent_id)
     await message.answer(
         "📝 <b>Создание подзадачи</b>\n\n"
-        "Отправьте ID родительской задачи\n"
-        "(используйте /tasks чтобы увидеть ID)\n\n"
+        "Введите номер задачи к которой хотите добавить подзадачу:\n\n"
         "Отмена: /cancel",
         parse_mode="HTML",
     )
 
 
-@dp.message(SubtaskStates.waiting_for_parent_id)
-async def subtask_parent_handler(message: Message, state: FSMContext):
-    short_id = message.text.strip()
 
-    # Получаем все задачи и ищем по короткому ID
-    api = get_api_client(message.from_user.id)
-    result = api.get_tasks()
-
-    if result.get("status") == "success":
-        tasks = result["tasks"]
-        # Ищем задачу по последним 4 цифрам ID
-        full_id = None
-        for task in tasks:
-            if task["id"].endswith(short_id):
-                full_id = task["id"]
-                break
-
-        if not full_id:
-            await message.answer(
-                f"❌ Задача с ID #{short_id} не найдена\n\n"
-                "Используйте /tasks чтобы увидеть ID задач"
-            )
-            await state.clear()
-            return
-
-        await state.update_data(parent_id=full_id)
-        await state.set_state(SubtaskStates.waiting_for_content)
-        await message.answer(
-            "✍️ Отправьте текст подзадачи:\n\n" "Например: Отжимания 20 раз"
-        )
-    else:
-        await message.answer("❌ Ошибка получения задач")
-        await state.clear()
-
-
-@dp.message(SubtaskStates.waiting_for_content)
-async def subtask_content_handler(message: Message, state: FSMContext):
-    content = message.text.strip()
-    data = await state.get_data()
-    parent_id = data.get("parent_id")
-
-    # Создаём подзадачу через API
-    import requests
-
-    try:
-        response = requests.post(
-            "http://localhost:8000/tasks",
-            headers={"X-Todoist-Token": get_token(message.from_user.id)},
-            json={"content": content, "parent_id": parent_id},
-        )
-        if response.status_code == 200:
-            await message.answer(
-                f"✅ <b>Подзадача создана!</b>\n\n"
-                f"📝 {content}\n"
-                f"↳ Родитель: {parent_id}",
-                parse_mode="HTML",
-            )
-        else:
-            await message.answer(
-                f"❌ Ошибка: "
-                f"{response.json().get('detail', 'Неизвестная ошибка')}"
-            )
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-    await state.clear()
 
 
 @dp.message(Command("delete"))
 async def delete_handler(message: Message, state: FSMContext):
-    api = get_api_client(message.from_user.id)
-    if not api:
+    client = get_mcp_client(message.from_user.id)
+    if not client:
         await message.answer("❌ Сначала авторизуйтесь: /auth")
         return
 
-    result = api.get_tasks()
-    if result.get("status") != "success":
-        await message.answer(
-            f"❌ Ошибка: {result.get('message', 'Неизвестная ошибка')}"
-        )
-        return
-
-    tasks = result["tasks"]
-    if not tasks:
-        await message.answer("📋 Задач нет")
-        return
-
-    # Сохраняем задачи в состояние
-    await state.update_data(tasks=tasks, page=0)
     await state.set_state(DeleteStates.waiting_for_number)
-
-    page = 0
-    start = page * 10
-    end = start + 10
-
-    text = "🗑️ <b>Удаление задач:</b>\n\n"
-    text += "Отправьте номер задачи:\n\n"
-
-    for i in range(start, min(end, len(tasks))):
-        text += f"{i + 1}. {tasks[i]['content'][:40]}\n"
-
-    text += "\n\nОтмена: /cancel"
-
-    # Кнопка "Ещё" если есть ещё задачи
-    keyboard = None
-    if len(tasks) > end:
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=f"Ещё ({len(tasks) - end})",
-                        callback_data=f"delete_more_{page + 1}",
-                    )
-                ]
-            ]
-        )
-
-    await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    await message.answer(
+        "🗑️ <b>Удаление задачи</b>\n\n"
+        "Введите номер задачи для удаления:\n\n"
+        "Используйте /tasks чтобы увидеть номера\n\n"
+        "Отмена: /cancel",
+        parse_mode="HTML"
+    )
 
 
-@dp.message(DeleteStates.waiting_for_number)
-async def delete_number_handler(message: Message, state: FSMContext):
-    try:
-        num = int(message.text.strip())
-    except ValueError:
-        await message.answer("❌ Неверный номер. Отправьте число или /cancel")
+
+
+
+@dp.callback_query(lambda c: c.data.startswith("complete_"))
+async def complete_task_callback(callback: CallbackQuery):
+    task_id = callback.data.split("_", 1)[1]
+    
+    client = get_mcp_client(callback.from_user.id)
+    if not client:
+        await callback.answer("❌ Сначала авторизуйтесь: /auth")
         return
+    
+    # Завершаем задачу
+    result = client.todoist.complete_task(task_id)
+    
+    if result["success"]:
+        await callback.answer("✅ Задача выполнена!")
+        # Обновляем список задач
+        response = client.chat("Покажи мои задачи")
+        await callback.message.edit_text(response, parse_mode="HTML")
+    else:
+        await callback.answer(f"❌ Ошибка: {result['error']}")
 
-    data = await state.get_data()
-    tasks = data.get("tasks", [])
 
-    if num < 1 or num > len(tasks):
-        await message.answer(f"❌ Номер должен быть от 1 до {len(tasks)}")
+@dp.callback_query(lambda c: c.data.startswith("life_area_"))
+async def life_area_callback(callback: CallbackQuery):
+    area_id = callback.data.split("_", 2)[2]
+    
+    client = get_mcp_client(callback.from_user.id)
+    if not client:
+        await callback.answer("❌ Сначала авторизуйтесь: /auth")
         return
-
-    task = tasks[num - 1]
-
-    # Удаляем через API
-    import requests
-
-    try:
-        response = requests.delete(
-            f"http://localhost:8000/tasks/{task['id']}",
-            headers={"X-Todoist-Token": get_token(message.from_user.id)},
-        )
-        if response.status_code == 200:
-            await message.answer(f"✅ Удалено: {task['content']}")
+    
+    # Получаем задачи области жизни
+    result = client.todoist.get_tasks(project_id=area_id)
+    
+    if result["success"]:
+        tasks = result["tasks"]
+        
+        # Находим название области жизни
+        areas_result = client.todoist.get_projects()
+        area_name = "Область жизни"
+        if areas_result["success"]:
+            for area in areas_result["projects"]:
+                if area["id"] == area_id:
+                    area_name = area["name"]
+                    break
+        
+        if not tasks:
+            text = f"🎉 В области '{area_name}' нет задач!"
         else:
-            await message.answer("❌ Ошибка удаления")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-    await state.clear()
+            text = f"🌟 <b>{area_name}</b> ({len(tasks)} задач):\n\n"
+            for i, task in enumerate(tasks, 1):
+                text += f"{i}. {task['content']}\n"
+        
+        await callback.message.edit_text(text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(f"❌ Ошибка: {result['error']}")
+    
+    await callback.answer()
 
 
 @dp.callback_query(lambda c: c.data.startswith("delete_more_"))
@@ -733,7 +711,7 @@ async def help_handler(message: Message):
     )
 
 
-async def handle_irga_show_tasks(message: Message, command_lower: str, api):
+async def handle_irga_show_tasks(message: Message, command_lower: str, client):
     """Обработка команды 'покажи задачи' от Ирги"""
     time_filter = None
     if "сегодня" in command_lower:
@@ -1046,93 +1024,36 @@ async def message_handler(message: Message, state: FSMContext):
     if current_state:
         return
 
-    api = get_api_client(message.from_user.id)
-    if not api:
+    client = get_mcp_client(message.from_user.id)
+    if not client:
         await message.answer("❌ Сначала авторизуйтесь: /auth")
         return
 
     text = message.text
-
-    # 🤖 Обработка обращения "Ирга"
-    if text.lower().startswith(("ирга", "irga")):
-        command = text[4:].strip()
-        if command.startswith(","):
-            command = command[1:].strip()
-
-        command_lower = command.lower()
-
-        # Используем Command Registry
-        if await process_irga_command(
-            message, command, command_lower, state, api
-        ):
-            return
-
-        # Если команда не распознана - создаём задачу
-        text = command
-
-    # Центральный диспетчер обработки сообщений
-    if await dispatch_message(message, state, api, message.text):
+    
+    # Обработка кнопок меню
+    if "📋 План на сегодня" in text:
+        response = client.chat("Покажи задачи на сегодня")
+        await message.answer(response, parse_mode="HTML")
         return
-
-    await message.answer("🧠 Анализирую сообщение...")
-
-    result = api.analyze_message(text)
-
-    if result.get("status") == "error":
-        await message.answer(f"❌ Ошибка: {result.get('message')}")
+    
+    if "📅 План на завтра" in text:
+        response = client.chat("Покажи задачи на завтра")
+        await message.answer(response, parse_mode="HTML")
         return
-
-    if result.get("action") == "task_created":
-        task = result["task"]
-        category = result.get("category", "Неизвестно")
-
-        # Дружелюбные варианты ответов
-        import random
-
-        greetings = [
-            "✅ <b>Отлично!</b>",
-            "✅ <b>Записал!</b>",
-            "✅ <b>Готово!</b>",
-            "✅ <b>Добавил!</b>",
-        ]
-
-        response = f"{random.choice(greetings)}\n\n"
-        response += f"📝 {task['content']}\n"
-        response += f"📂 {category}\n"
-
-        if task.get("due"):
-            response += f"📅 {task['due']['string']}\n"
-
-        response += f"\n🔗 <a href='{task['url']}'>Открыть в Todoist</a>"
-
-    elif result.get("action") == "task_completed":
-        task = result["task"]
-        import random
-
-        congrats = [
-            "🎉 <b>Отличная работа!</b>",
-            "🎉 <b>Молодец!</b>",
-            "🎉 <b>Здорово!</b>",
-            "🎉 <b>Круто!</b>",
-        ]
-        response = f"{random.choice(congrats)}\n\n"
-        response += f"✅ {task['content']}\n\n"
-        response += "Продолжайте в том же духе! 💪"
-
-    elif result.get("action") == "tasks_list":
-        tasks = result["tasks"]
-        total = result["total"]
-        response = f"📋 <b>Найдено задач: {total}</b>\n\n"
-
-        for i, task in enumerate(tasks[:5], 1):
-            response += f"{i}. {task['content']}\n"
-
-    else:
-        response = "🤔 Не понял. Ответ API: " + str(result)
-
-    await message.answer(
-        response, parse_mode="HTML", disable_web_page_preview=True
-    )
+    
+    if "🔄 Перенос просрочки" in text:
+        response = client.chat("Перенос просрочки")
+        await message.answer(response, parse_mode="HTML")
+        return
+    
+    if "✏️ Редактировать" in text:
+        await message.answer("⚠️ Редактирование задач будет в v2.0")
+        return
+    
+    # Обычное сообщение в MCP клиент
+    response = client.chat(text)
+    await message.answer(response, parse_mode="HTML")
 
 
 async def main():
@@ -1147,7 +1068,7 @@ async def main():
         BotCommand(command="auth", description="Авторизация"),
         BotCommand(command="tasks", description="Список задач"),
         BotCommand(command="subtask", description="Создать подзадачу"),
-        BotCommand(command="projects", description="Проекты"),
+        BotCommand(command="areas", description="Области жизни"),
         BotCommand(command="delete", description="Удалить задачу"),
         BotCommand(command="help", description="Помощь"),
         BotCommand(command="logout", description="Выход"),
